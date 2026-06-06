@@ -1,0 +1,1 @@
+# No third-party deps: boto3 ships in the Lambda runtime; everything else is stdlib.
