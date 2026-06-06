@@ -1,12 +1,20 @@
 # OAuth-fronted MCP server wrapping a shared-key API (Tavily)
 
-A working, deployed reference for the AgentCon HK 2026 thesis: **agents as
-delegates**. Wrap an upstream API whose only auth is a *shared* key, and put a
-real per-user OAuth 2.1 front door on it with Amazon Cognito — no new service
-accounts, no shared identity leaking to clients.
+Put a real per-user **OAuth 2.1** front door — backed by **Amazon Cognito** —
+in front of an upstream API whose only auth is a *shared* key. Each caller is
+authenticated as themselves, scoped, and audited; the shared key never leaves
+the server. No new service accounts, no shared identity leaking to clients.
 
-> Companion to the talk *"Empower Team-Wide Vibe Coding with LLM Gateway and
-> Security-First MCPs"* and the write-up linked at the bottom.
+This is a complete, deployed AWS reference built as the companion to a
+conference talk on security-first MCP servers:
+
+- **Talk slides:** <https://the-quantum-nargle.github.io/agentcon-2026-hk-slides/>
+- **Write-up:** the architecture, cost breakdown, and the "agents as delegates"
+  argument in full (linked from the slides).
+
+> The thesis: an AI agent should act as the *delegate* of a specific human or
+> client — with that identity's permissions and a real audit trail — not behind
+> a single shared "god-token" the whole team uses.
 
 ## The problem this solves
 
@@ -23,9 +31,9 @@ shows up for any SaaS or internal/legacy API whose only auth is an API key
 ## The architecture
 
     MCP client
-      │  Authorization: Bearer <Cognito access token>   (per-user / per-client)
+      │  Authorization: Bearer <Amazon Cognito access token>   (per-user / per-client)
       ▼
-    API Gateway HTTP API  ──  Cognito JWT authorizer (validates sig/iss/aud at the edge)
+    API Gateway HTTP API  ──  Amazon Cognito JWT authorizer (validates sig/iss/aud at the edge)
       ▼
     Lambda (MCP server)   ──  re-checks the `tavily-mcp/search` scope
       │                       logs the caller identity (audit)
@@ -33,7 +41,7 @@ shows up for any SaaS or internal/legacy API whose only auth is an API key
       ▼
     Tavily Search API
 
-- **Cognito** = OAuth 2.1 authorization server. Two app clients:
+- **Amazon Cognito** = OAuth 2.1 authorization server. Two app clients:
   - M2M (`client_credentials`) for backend agents + the curl e2e test.
   - Public (`authorization_code` + PKCE) for the per-user delegation story.
 - **API Gateway + JWT authorizer** = authentication at the edge. Invalid/expired/
