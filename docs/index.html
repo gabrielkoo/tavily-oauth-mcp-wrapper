@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Demo — OAuth MCP Wrapper for Tavily</title>
+<style>
+  :root {
+    --accent: #FF0068;
+    --accent-dim: rgba(255, 0, 104, 0.15);
+    --accent-2: #191357;
+    --bg-terminal: #1e1e2e;
+    --bg-terminal-alt: #181825;
+    --border: #313244;
+    --text: #cdd6f4;
+    --dim: #585b70;
+    --success: #a6e3a1;
+    --error: #f38ba8;
+    --warning: #f9e2af;
+    --info: #89dceb;
+    --purple: #cba6f7;
+    --orange: #fab387;
+    --blue: #89b4fa;
+    --okta-blue: #007dc1;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace;
+    font-size: 15px;
+    line-height: 1.6;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ── Scene system ── */
+  .scene {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.6s ease, transform 0.6s ease;
+    transform: scale(0.97);
+    overflow-y: auto;
+  }
+  .scene.active {
+    opacity: 1;
+    pointer-events: auto;
+    transform: scale(1);
+    z-index: 10;
+  }
+  .scene.exiting {
+    opacity: 0;
+    transform: scale(1.02);
+    z-index: 5;
+  }
+
+  /* ── Terminal scenes ── */
+  .terminal-scene {
+    background: var(--bg-terminal);
+    padding: 12px 16px;
+    padding-bottom: 100px;
+  }
+  .titlebar {
+    background: var(--bg-terminal-alt);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: -12px -16px 12px -16px;
+  }
+  .titlebar .dots { display: flex; gap: 6px; }
+  .titlebar .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot-red { background: var(--error); }
+  .dot-yellow { background: var(--warning); }
+  .dot-green { background: var(--success); }
+  .titlebar .title { flex: 1; text-align: center; color: #6c7086; font-size: 13px; }
+
+  .prompt { color: var(--blue); }
+  .cmd { color: var(--text); }
+  .success { color: var(--success); }
+  .error { color: var(--error); }
+  .warning { color: var(--warning); }
+  .accent { color: var(--purple); }
+  .dim { color: var(--dim); }
+  .info { color: var(--info); }
+  .pink { color: var(--accent); }
+  .line { margin: 2px 0; min-height: 1.6em; }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: bold;
+  }
+  .badge-tool { border: 1px solid var(--blue); color: var(--blue); }
+  .badge-mcp { border: 1px solid var(--purple); color: var(--purple); }
+  .badge-ok { border: 1px solid var(--success); color: var(--success); }
+  .badge-err { border: 1px solid var(--error); color: var(--error); }
+  .badge-auth { border: 1px solid var(--warning); color: var(--warning); }
+
+  .json-block {
+    background: var(--bg-terminal-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 6px 0 6px 20px;
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .json-key { color: var(--blue); }
+  .json-str { color: var(--success); }
+  .json-num { color: var(--orange); }
+
+  .step { max-height: 0; overflow: hidden; opacity: 0; transition: max-height 0.5s ease, opacity 0.4s ease 0.1s; }
+  .step.visible { max-height: 2000px; opacity: 1; }
+
+  /* ── Browser scenes ── */
+  .browser-scene {
+    font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  .browser-chrome {
+    background: #2b2b3d;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .browser-chrome .dots { display: flex; gap: 6px; }
+  .browser-chrome .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .url-bar {
+    flex: 1;
+    background: #1e1e2e;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 14px;
+    color: #888;
+    font-size: 13px;
+    font-family: -apple-system, sans-serif;
+  }
+  .url-bar .lock { color: var(--success); margin-right: 6px; }
+  .browser-body {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-y: auto;
+  }
+
+  /* Cognito page */
+  .cognito-body { background: #f5f5f5; }
+  .cognito-container {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.1);
+    width: 420px;
+    padding: 40px;
+    text-align: center;
+  }
+  .cognito-logo {
+    width: 60px; height: 60px;
+    background: var(--accent);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px;
+    font-size: 28px;
+  }
+  .app-name { font-size: 20px; font-weight: 600; color: #333; margin-bottom: 4px; }
+  .app-subtitle { font-size: 13px; color: #888; margin-bottom: 28px; }
+  .cognito-badge-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #f0f0f0; padding: 4px 10px; border-radius: 4px;
+    font-size: 11px; color: #888; margin-bottom: 24px;
+  }
+  .cognito-badge-label .aws { font-weight: bold; color: #FF9900; }
+  .form-group { text-align: left; margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 13px; color: #555; margin-bottom: 6px; font-weight: 500; }
+  .form-group input {
+    width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 14px; color: #333; background: #fafafa;
+  }
+  .btn {
+    width: 100%; padding: 12px; border: none; border-radius: 6px;
+    font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    display: block; text-decoration: none; text-align: center;
+  }
+  .btn-signin-disabled { background: #ddd; color: #999; cursor: not-allowed; margin-bottom: 12px; }
+  .form-divider {
+    display: flex; align-items: center; gap: 12px; margin: 20px 0; color: #aaa; font-size: 12px;
+  }
+  .form-divider::before, .form-divider::after { content: ''; flex: 1; border-top: 1px solid #e0e0e0; }
+  .btn-sso {
+    background: #1a1a2e; color: #fff;
+    display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px;
+  }
+  .btn-sso:hover { background: #2a2a4e; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+  .sso-icon {
+    width: 22px; height: 22px; background: #fff; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: bold; color: #1a1a2e;
+  }
+  .cognito-footer { margin-top: 24px; font-size: 11px; color: #bbb; }
+  .cognito-footer a { color: #888; text-decoration: none; }
+
+  /* Okta page */
+  .okta-body { background: #f7f8fa; }
+  .okta-container { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 30px rgba(0,0,0,0.08); width: 400px; overflow: hidden; }
+  .okta-header {
+    background: linear-gradient(135deg, #1a0a18 0%, #2d1b36 100%);
+    padding: 28px 32px; text-align: center;
+  }
+  .okta-header .co-logo {
+    width: 48px; height: 48px; background: var(--accent); border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 10px;
+  }
+  .okta-header h2 { color: #fff; font-size: 18px; font-weight: 600; }
+  .okta-header p { color: rgba(255,255,255,0.6); font-size: 13px; margin-top: 4px; }
+  .idp-badge {
+    display: inline-block; background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8);
+    padding: 3px 8px; border-radius: 3px; font-size: 11px; margin-top: 8px;
+  }
+  .okta-body-inner { padding: 32px; }
+  .mfa-note {
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px;
+    padding: 8px 12px; font-size: 12px; color: #92400e; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .input-filled { background: #f8fff8 !important; border-color: #a6e3a1 !important; }
+  .remember-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px; font-size: 13px;
+  }
+  .remember-row label { display: flex; align-items: center; gap: 6px; color: #555; cursor: pointer; }
+  .remember-row a { color: var(--okta-blue); text-decoration: none; font-size: 12px; }
+  .btn-verify {
+    width: 100%; padding: 12px; background: var(--okta-blue); color: #fff;
+    border: none; border-radius: 4px; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .btn-verify:hover { background: #006aa8; }
+  .okta-footer {
+    text-align: center; padding: 16px 32px 24px; border-top: 1px solid #eee;
+    font-size: 11px; color: #aaa;
+  }
+  .okta-footer .okta-logo { font-weight: 700; color: #333; font-size: 13px; }
+
+  /* Success page */
+  .success-body { background: #f5f5f5; }
+  .success-container {
+    background: #fff; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    width: 480px; padding: 48px 40px; text-align: center;
+    font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  .checkmark-circle {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: #ecfdf5; border: 3px solid var(--success);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 20px; animation: pop 0.4s ease-out;
+  }
+  @keyframes pop {
+    0% { transform: scale(0.5); opacity: 0; }
+    70% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .checkmark-icon { font-size: 40px; color: #22c55e; }
+  .success-container h2 { font-size: 22px; color: #1a1a2e; margin-bottom: 8px; }
+  .success-subtitle { color: #666; font-size: 14px; margin-bottom: 28px; }
+  .token-info {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+    padding: 16px 20px; text-align: left; margin-bottom: 20px; font-size: 13px;
+  }
+  .token-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid #f1f5f9;
+  }
+  .token-row:last-child { border-bottom: none; }
+  .token-label { color: #64748b; font-weight: 500; }
+  .token-value { color: #334155; font-family: 'SF Mono', monospace; font-size: 12px; }
+  .token-value.tok-ok { color: #16a34a; }
+  .token-value.tok-masked { color: #94a3b8; letter-spacing: 1px; }
+  .scope-tags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .scope-tag {
+    background: #eff6ff; color: #2563eb; padding: 2px 8px; border-radius: 3px;
+    font-size: 11px; font-family: 'SF Mono', monospace;
+  }
+  .close-msg {
+    background: #fefce8; border: 1px solid #fde68a; border-radius: 6px;
+    padding: 12px 16px; font-size: 13px; color: #854d0e; margin-bottom: 16px;
+  }
+  .redirect-text { color: #999; font-size: 12px; margin-top: 8px; }
+  .redirect-text .cdown { color: var(--accent); font-weight: 700; }
+  .progress-bar-bg {
+    width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 16px; overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple));
+    border-radius: 2px; width: 0%;
+    transition: width 3.5s linear;
+  }
+
+  /* ── Loading overlay ── */
+  .loading-overlay {
+    display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(255,255,255,0.92); z-index: 100;
+    flex-direction: column; align-items: center; justify-content: center;
+    font-family: -apple-system, sans-serif;
+  }
+  .loading-overlay.active { display: flex; }
+  .loading-spinner {
+    width: 40px; height: 40px; border: 3px solid #eee; border-top-color: var(--okta-blue);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-label { margin-top: 16px; color: #555; font-size: 14px; }
+
+  /* ── Comparison box (terminal) ── */
+  .comparison-box {
+    background: var(--bg-terminal-alt); border: 1px solid var(--error);
+    border-radius: 8px; padding: 16px 20px; margin: 10px 0 10px 20px; font-size: 13px;
+  }
+  .comparison-box h4 { color: var(--error); font-size: 14px; margin-bottom: 10px; }
+  .comparison-row { display: flex; gap: 8px; margin: 4px 0; align-items: flex-start; }
+  .comparison-row .icon { flex-shrink: 0; width: 18px; text-align: center; }
+
+  /* ── Global HUD ── */
+  .hud {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--bg-terminal-alt); border-top: 1px solid var(--border);
+    padding: 6px 16px; display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: #6c7086; z-index: 999;
+  }
+  .hud-hint {
+    background: var(--accent-dim); border: 1px solid var(--accent);
+    color: var(--accent); padding: 4px 12px; border-radius: 4px;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+  .hud-step { color: var(--dim); }
+
+  /* highlight arrow for browser scenes */
+  .arrow-hint {
+    position: absolute; bottom: 80px; right: 30px;
+    background: var(--accent); color: #fff;
+    padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    animation: bounce 1.5s ease-in-out infinite; z-index: 50; cursor: pointer;
+    font-family: -apple-system, sans-serif;
+  }
+  @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+</style>
+</head>
+<body>
+
+<!-- ╔══════════════════════════════════════════════════════════╗
+     ║  SCENE 1: Terminal — ai coding agent, MCP needs auth       ║
+     ╚══════════════════════════════════════════════════════════╝ -->
+<div class="scene terminal-scene active" id="scene-terminal-1">
+  <div class="titlebar">
+    <div class="dots"><div class="dot dot-red"></div><div class="dot dot-yellow"></div><div class="dot dot-green"></div></div>
+    <div class="title">Terminal — ai coding agent — ~/project</div>
+  </div>
+
+  <div class="line"><span class="prompt">~/project $</span> <span class="cmd">agent</span></div>
+  <div class="line">&nbsp;</div>
+  <div style="display:inline-block; border:1px solid var(--accent); border-radius:6px; padding:8px 20px; margin:4px 0 4px 16px;">
+    <div><span style="font-weight:bold;color:#cdd6f4">ai-coding-agent</span> <span class="dim">v1.0.40</span></div>
+    <div><span class="dim">Model: a-random-sota-model via LLM Gateway</span></div>
+  </div>
+  <div class="line">&nbsp;</div>
+  <div class="line"><span class="info">MCP Servers:</span></div>
+  <div class="line">  <span class="success">&#10003;</span> notion <span class="dim">(remote — OAuth)</span></div>
+  <div class="line">  <span class="success">&#10003;</span> github <span class="dim">(remote — OAuth)</span></div>
+  <div class="line">  <span class="warning">&#9679;</span> tavily <span class="dim">(remote — OAuth)</span> <span class="warning">— Not authenticated</span></div>
+  <div class="line">&nbsp;</div>
+  <div class="line"><span class="prompt">You:</span> <span class="cmd">Use the tavily MCP to search "what is the model context protocol"</span></div>
+
+  <!-- Step: 401 + opening browser -->
+  <div class="step" data-scene="scene-terminal-1" data-order="1">
+    <div class="line">&nbsp;</div>
+    <hr class="divider">
+    <div class="line"><span class="accent">Agent:</span> I'll run that search for you.</div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="badge badge-tool">tool</span> <span class="info">search</span></div>
+    <div class="json-block">
+<span class="dim">{</span>
+  <span class="json-key">"query"</span>: <span class="json-str">"what is the model context protocol"</span>
+<span class="dim">}</span>
+    </div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="badge badge-mcp">mcp</span> <span class="warning">tavily requires authentication</span></div>
+    <div class="line"><span class="dim">  Server returned: </span><span class="error">401 Unauthorized — Bearer token required</span></div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="accent">Agent:</span> The tavily MCP server requires OAuth authentication.</div>
+    <div class="line">  <span class="info">Opening browser for SSO login...</span></div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="dim">  &#9696; Waiting for OAuth callback on localhost:9876...</span></div>
+  </div>
+</div>
+
+<!-- ╔══════════════════════════════════════════════════════════╗
+     ║  SCENE 2: Browser — Cognito Hosted UI                  ║
+     ╚══════════════════════════════════════════════════════════╝ -->
+<div class="scene" id="scene-cognito">
+  <div class="browser-scene">
+    <div class="browser-chrome">
+      <div class="dots"><div class="dot dot-red"></div><div class="dot dot-yellow"></div><div class="dot dot-green"></div></div>
+      <div class="url-bar"><span class="lock">&#128274;</span> auth.example.com/login?client_id=tavily-mcp&amp;response_type=code&amp;redirect_uri=http://localhost:9876/callback</div>
+    </div>
+    <div class="browser-body cognito-body">
+      <div class="cognito-container">
+        <div class="cognito-logo">&#128269;</div>
+        <div class="app-name">Tavily MCP Wrapper</div>
+        <div class="app-subtitle">Sign in to continue to MCP Authorization</div>
+        <div class="cognito-badge-label"><span class="aws">&#9679; AWS</span> Amazon Cognito Hosted UI</div>
+
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" placeholder="name@example.com" disabled style="opacity: 0.5">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" placeholder="Enter password" disabled style="opacity: 0.5">
+        </div>
+        <button class="btn btn-signin-disabled" disabled>Sign In</button>
+        <div class="form-divider">or</div>
+        <a href="#" class="btn btn-sso" id="sso-btn">
+          <span class="sso-icon">O</span>
+          Login with Company SSO Account
+        </a>
+        <div class="cognito-footer">
+          <p>Protected by Amazon Cognito &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a></p>
+          <p style="margin-top: 6px; color: #ccc">OAuth 2.0 + PKCE &middot; redirect_uri=http://localhost:9876/callback</p>
+        </div>
+      </div>
+    </div>
+    <div class="arrow-hint" data-click="sso-btn">Click "Login with Company SSO" &#8595;</div>
+  </div>
+</div>
+
+<!-- ╔══════════════════════════════════════════════════════════╗
+     ║  SCENE 3: Browser — O*ta SSO Login                     ║
+     ╚══════════════════════════════════════════════════════════╝ -->
+<div class="scene" id="scene-okta">
+  <div class="browser-scene">
+    <div class="browser-chrome">
+      <div class="dots"><div class="dot dot-red"></div><div class="dot dot-yellow"></div><div class="dot dot-green"></div></div>
+      <div class="url-bar"><span class="lock">&#128274;</span> sso.example.com/app/tavily-mcp/sso/saml</div>
+    </div>
+    <div class="browser-body okta-body">
+      <div class="okta-container">
+        <div class="okta-header">
+          <div class="co-logo">&#128269;</div>
+          <h2>Example Corp</h2>
+          <p>Company Single Sign-On</p>
+          <div class="idp-badge">SAML 2.0 &middot; Federated Identity</div>
+        </div>
+        <div class="okta-body-inner">
+          <div class="mfa-note">&#128274; Signing in to: <strong>tavily-mcp.example.com</strong></div>
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" value="dev@example.com" class="input-filled" readonly>
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" value="••••••••••••" class="input-filled" readonly>
+          </div>
+          <div class="remember-row">
+            <label><input type="checkbox" checked> Remember this device</label>
+            <a href="#">Forgot password?</a>
+          </div>
+          <button class="btn-verify" id="verify-btn">Verify &amp; Continue</button>
+        </div>
+        <div class="okta-footer">
+          Secured by <span class="okta-logo">O*ta</span> Identity Cloud
+        </div>
+      </div>
+      <div class="loading-overlay" id="okta-loading">
+        <div class="loading-spinner"></div>
+        <div class="loading-label">Verifying credentials &amp; redirecting to Cognito...</div>
+      </div>
+    </div>
+    <div class="arrow-hint" data-click="verify-btn">Click "Verify & Continue" &#8595;</div>
+  </div>
+</div>
+
+<!-- ╔══════════════════════════════════════════════════════════╗
+     ║  SCENE 4: Browser — OAuth Success                      ║
+     ╚══════════════════════════════════════════════════════════╝ -->
+<div class="scene" id="scene-success">
+  <div class="browser-scene">
+    <div class="browser-chrome">
+      <div class="dots"><div class="dot dot-red"></div><div class="dot dot-yellow"></div><div class="dot dot-green"></div></div>
+      <div class="url-bar"><span class="lock">&#128274;</span> localhost:9876/callback?code=aBcDe12345&amp;state=pkce_xyz</div>
+    </div>
+    <div class="browser-body success-body">
+      <div class="success-container">
+        <div class="checkmark-circle"><span class="checkmark-icon">&#10003;</span></div>
+        <h2>Authorization Successful</h2>
+        <p class="success-subtitle">OAuth 2.0 token received via PKCE flow</p>
+        <div class="token-info">
+          <div class="token-row">
+            <span class="token-label">User</span>
+            <span class="token-value tok-ok">dev@example.com</span>
+          </div>
+          <div class="token-row">
+            <span class="token-label">Identity Provider</span>
+            <span class="token-value">O*ta SAML &rarr; Amazon Cognito</span>
+          </div>
+          <div class="token-row">
+            <span class="token-label">Access Token</span>
+            <span class="token-value tok-masked">eyJhbG...Rk4x &#128274;</span>
+          </div>
+          <div class="token-row">
+            <span class="token-label">Token Type</span>
+            <span class="token-value">Bearer (JWT)</span>
+          </div>
+          <div class="token-row">
+            <span class="token-label">Expires In</span>
+            <span class="token-value">3600s</span>
+          </div>
+          <div class="token-row">
+            <span class="token-label">Scopes</span>
+            <div class="scope-tags">
+              <span class="scope-tag">openid</span>
+              <span class="scope-tag">tavily-mcp/search</span>
+            </div>
+          </div>
+        </div>
+        <div class="close-msg">&#9989; Token sent to AI Coding Agent on <strong>localhost:9876</strong>. You can close this browser tab.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ╔══════════════════════════════════════════════════════════╗
+     ║  SCENE 5: Terminal — Authenticated, tool calls          ║
+     ╚══════════════════════════════════════════════════════════╝ -->
+<div class="scene terminal-scene" id="scene-terminal-2">
+  <div class="titlebar">
+    <div class="dots"><div class="dot dot-red"></div><div class="dot dot-yellow"></div><div class="dot dot-green"></div></div>
+    <div class="title">Terminal — ai coding agent — ~/project</div>
+  </div>
+
+  <div class="line"><span class="dim">... (OAuth flow completed in browser)</span></div>
+  <div class="line">&nbsp;</div>
+
+  <!-- Step 1: Auth confirmation -->
+  <div id="auth-confirm">
+    <div class="line"><span class="badge badge-auth">oauth</span> <span class="success">&#10003; Token received from Cognito</span></div>
+    <div class="line"><span class="dim">  User:</span> <span class="success">dev@example.com</span></div>
+    <div class="line"><span class="dim">  Scopes:</span> <span class="info">openid, tavily-mcp/search</span></div>
+    <div class="line"><span class="dim">  Expires:</span> <span class="cmd">3600s</span></div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="info">MCP Servers:</span></div>
+    <div class="line">  <span class="success">&#10003;</span> notion <span class="dim">(remote — OAuth)</span></div>
+    <div class="line">  <span class="success">&#10003;</span> github <span class="dim">(remote — OAuth)</span></div>
+    <div class="line">  <span class="success">&#10003;</span> tavily <span class="dim">(remote — OAuth)</span> <span class="success">— Authenticated as dev</span></div>
+    <div class="line">&nbsp;</div>
+    <hr class="divider">
+    <div class="line"><span class="accent">Agent:</span> Great, I'm now authenticated. Let me run that search.</div>
+  </div>
+
+  <!-- Step 2: Successful call -->
+  <div class="step" data-scene="scene-terminal-2" data-order="1">
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="badge badge-tool">tool</span> <span class="info">search</span></div>
+    <div class="json-block">
+<span class="dim">// params</span>
+<span class="dim">{</span>
+  <span class="json-key">"query"</span>: <span class="json-str">"what is the model context protocol"</span>
+<span class="dim">}</span>
+    </div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="dim">// output</span></div>
+    <div class="json-block">
+<span class="dim">{</span>
+  <span class="json-key">"answer"</span>: <span class="json-str">"The Model Context Protocol (MCP) is an open standard that lets AI models connect to external tools and data sources through a uniform interface."</span>,
+  <span class="json-key">"results"</span>: [
+    <span class="dim">{</span> <span class="json-key">"title"</span>: <span class="json-str">"What is the Model Context Protocol?"</span>,
+      <span class="json-key">"url"</span>: <span class="json-str">"https://www.databricks.com/blog/what-is-model-context-protocol"</span> <span class="dim">}</span>
+  ]
+<span class="dim">}</span>
+    </div>
+    <div class="line"><span class="badge badge-ok">200</span> <span class="success">&#10003; Returned for dev@example.com (JWT validated)</span></div>
+  </div>
+
+  <!-- Step 3: Agent summarizes + user asks for an out-of-scope tool -->
+  <div class="step" data-scene="scene-terminal-2" data-order="2">
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="accent">Agent:</span> Here's what I found:</div>
+    <div class="line" style="margin-left: 20px"><span class="cmd"><strong>MCP is an open standard</strong> for connecting AI models to external tools and data through a uniform interface.</span></div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="prompt">You:</span> <span class="cmd">Now use tavily to extract the full text of that page</span></div>
+  </div>
+
+  <!-- Step 4: 403 Forbidden -->
+  <div class="step" data-scene="scene-terminal-2" data-order="3">
+    <div class="line">&nbsp;</div>
+    <hr class="divider">
+    <div class="line"><span class="accent">Agent:</span> I'll try the extract tool.</div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="badge badge-tool">tool</span> <span class="info">extract</span></div>
+    <div class="json-block">
+<span class="dim">// params</span>
+<span class="dim">{</span>
+  <span class="json-key">"url"</span>: <span class="json-str">"https://www.databricks.com/blog/what-is-model-context-protocol"</span>
+<span class="dim">}</span>
+    </div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="dim">// output</span></div>
+    <div class="json-block" style="border-color: var(--error);">
+<span class="dim">{</span>
+  <span class="json-key">"error"</span>: <span class="error">"forbidden"</span>,
+  <span class="json-key">"message"</span>: <span class="error">"dev@example.com does not have scope 'tavily-mcp/extract'"</span>,
+  <span class="json-key">"required_scope"</span>: <span class="json-str">"tavily-mcp/extract"</span>,
+  <span class="json-key">"user_scopes"</span>: [<span class="json-str">"openid"</span>, <span class="json-str">"tavily-mcp/search"</span>],
+  <span class="json-key">"status"</span>: <span class="json-num">403</span>
+<span class="dim">}</span>
+    </div>
+    <div class="line"><span class="badge badge-err">403</span> <span class="error">&#10007; Forbidden — missing required scope</span></div>
+  </div>
+
+  <!-- Step 5: Agent explains -->
+  <div class="step" data-scene="scene-terminal-2" data-order="4">
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="accent">Agent:</span> Access denied. Your token only grants <span class="info">tavily-mcp/search</span>.</div>
+    <div class="line" style="margin-left: 20px"><span class="dim">The extract tool requires</span> <span class="error">tavily-mcp/extract</span><span class="dim">, which your role doesn't include.</span></div>
+    <div class="line">&nbsp;</div>
+    <div class="line" style="margin-left: 20px"><span class="success"><strong>This is OAuth working as intended:</strong></span></div>
+    <div class="line" style="margin-left: 20px"><span class="dim">The AI agent can only call the tools</span> <span class="success">your scopes</span> <span class="dim">allow. No more, no less.</span></div>
+  </div>
+
+  <!-- Step 6: Old way comparison -->
+  <div class="step" data-scene="scene-terminal-2" data-order="5">
+    <div class="line">&nbsp;</div>
+    <hr class="divider">
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="warning" style="font-size: 16px; font-weight: bold">&#9888;  Meanwhile, in the shared-API-key timeline...</span></div>
+    <div class="comparison-box">
+      <h4>&#128128; The "Old Way" — hardcoded credentials</h4>
+      <div class="comparison-row"><span class="icon error">&#10007;</span><span><span class="error">Shared API key</span> baked into every developer's <span class="dim">mcp.json</span></span></div>
+      <div class="comparison-row"><span class="icon error">&#10007;</span><span>Every call shares one identity — <span class="error">no per-user scope, no tool boundaries</span></span></div>
+      <div class="comparison-row"><span class="icon error">&#10007;</span><span>Audit log says <span class="dim">"api-key-prod"</span> — <span class="error">who actually made the call?</span></span></div>
+      <div class="comparison-row"><span class="icon error">&#10007;</span><span>Someone leaves? <span class="error">Rotate key &#8594; break everyone</span></span></div>
+      <div class="comparison-row"><span class="icon error">&#10007;</span><span>Key leaked in a repo? <span class="error">Full access until someone notices</span></span></div>
+    </div>
+    <div class="line">&nbsp;</div>
+    <div class="json-block" style="border-color: var(--error); font-size: 14px;">
+<span class="dim">// .mcp.json — the nightmare version</span>
+{
+  <span class="json-key">"tavily"</span>: {
+    <span class="json-key">"type"</span>: <span class="json-str">"stdio"</span>,
+    <span class="json-key">"command"</span>: <span class="json-str">"npx"</span>,
+    <span class="json-key">"args"</span>: [<span class="json-str">"tavily-mcp"</span>],
+    <span class="json-key">"env"</span>: {
+      <span class="json-key">"TAVILY_API_KEY"</span>: <span class="error">"tvly-SHARED-KEY-everyone-has-this"</span>  <span class="dim">// &#128128; on every laptop</span>
+    }
+  }
+}
+    </div>
+  </div>
+
+  <!-- Step 7: The OAuth version (punchline) -->
+  <div class="step" data-scene="scene-terminal-2" data-order="6">
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="success" style="font-size: 16px; font-weight: bold">&#10003;  With OAuth MCP</span></div>
+    <div class="json-block" style="border-color: var(--success); font-size: 14px;">
+<span class="dim">// .mcp.json — the OAuth version</span>
+{
+  <span class="json-key">"tavily"</span>: {
+    <span class="json-key">"type"</span>: <span class="json-str">"http"</span>,
+    <span class="json-key">"url"</span>: <span class="json-str">"https://&lt;your-api&gt;.execute-api.us-east-1.amazonaws.com/mcp"</span>
+    <span class="dim">// That's it. No secrets. OAuth handles auth per-user.</span>
+  }
+}
+    </div>
+    <div class="line">&nbsp;</div>
+    <div class="line" style="margin-left: 20px"><span class="success">&#10003;</span> <span class="cmd">Per-user identity</span> <span class="dim">— audit says exactly who</span></div>
+    <div class="line" style="margin-left: 20px"><span class="success">&#10003;</span> <span class="cmd">Scoped access</span> <span class="dim">— only what your role allows</span></div>
+    <div class="line" style="margin-left: 20px"><span class="success">&#10003;</span> <span class="cmd">Revoke one user</span> <span class="dim">— everyone else keeps working</span></div>
+    <div class="line" style="margin-left: 20px"><span class="success">&#10003;</span> <span class="cmd">No secrets in config</span> <span class="dim">— nothing to leak</span></div>
+    <div class="line" style="margin-left: 20px"><span class="success">&#10003;</span> <span class="cmd">SSO integration</span> <span class="dim">— same login as everything else</span></div>
+    <div class="line">&nbsp;</div>
+    <div class="line"><span class="pink" style="font-size: 15px"><strong>"If you can't do it in the UI, the agent can't do it via MCP"</strong></span></div>
+  </div>
+</div>
+
+<!-- ── Watermark ── -->
+<div style="position:fixed;bottom:36px;left:0;right:0;background:#0d0d1a;border-top:1px solid var(--border);padding:5px 16px;text-align:center;font-size:11px;color:#585b70;z-index:998;letter-spacing:0.5px;">
+  Interactive demo: per-user OAuth in front of a shared-key MCP &mdash;
+  <a href="https://github.com/gabrielkoo/tavily-oauth-mcp-wrapper" style="color:var(--accent);font-weight:600;text-decoration:none;">source</a> &middot;
+  <a href="https://the-quantum-nargle.github.io/agentcon-2026-hk-slides/" style="color:var(--accent);font-weight:600;text-decoration:none;">talk slides</a>
+</div>
+
+<!-- ── HUD ── -->
+<div class="hud">
+  <span class="hud-step" id="hud-step">Scene 1 / 5</span>
+  <span id="hud-label">tavily MCP | OAuth 2.0 + PKCE</span>
+  <span class="hud-hint" id="hud-hint">&#8592; p / n &#8594; &middot; Space / Click</span>
+</div>
+
+<script>
+// ── Scene & step management ──
+const flow = [
+  // Each entry: { scene, step? (within-scene step order) }
+  // Scene 1: terminal unauthed
+  { scene: 'scene-terminal-1' },            // 0: initial view
+  { scene: 'scene-terminal-1', step: 1 },   // 1: 401 + waiting
+  // Scene 2: cognito login
+  { scene: 'scene-cognito' },               // 2: cognito hosted UI
+  // Scene 3: okta login
+  { scene: 'scene-okta' },                  // 3: okta SSO
+  // (okta verify triggers auto-advance with loading)
+  // Scene 4: success page
+  { scene: 'scene-success' },               // 4: oauth success
+  // Scene 5: terminal authed
+  { scene: 'scene-terminal-2' },            // 5: auth confirmed
+  { scene: 'scene-terminal-2', step: 1 },   // 6: successful call
+  { scene: 'scene-terminal-2', step: 2 },   // 7: summary + user asks forbidden
+  { scene: 'scene-terminal-2', step: 3 },   // 8: 403
+  { scene: 'scene-terminal-2', step: 4 },   // 9: agent explains
+  { scene: 'scene-terminal-2', step: 5 },   // 10: old way comparison
+  { scene: 'scene-terminal-2', step: 6 },   // 11: oauth version (punchline)
+];
+
+let pos = 0;
+let transitioning = false;
+let autoAdvanceTimer = null;
+
+const sceneMap = {
+  'scene-terminal-1': 1,
+  'scene-cognito': 2,
+  'scene-okta': 3,
+  'scene-success': 4,
+  'scene-terminal-2': 5,
+};
+
+function showScene(sceneId) {
+  document.querySelectorAll('.scene').forEach(s => {
+    if (s.id === sceneId) return;
+    if (s.classList.contains('active')) {
+      s.classList.remove('active');
+      s.classList.add('exiting');
+      setTimeout(() => s.classList.remove('exiting'), 600);
+    }
+  });
+  const target = document.getElementById(sceneId);
+  if (!target.classList.contains('active')) {
+    setTimeout(() => target.classList.add('active'), 50);
+  }
+}
+
+function showStep(sceneId, order) {
+  const el = document.querySelector(`.step[data-scene="${sceneId}"][data-order="${order}"]`);
+  if (el) {
+    el.classList.add('visible');
+    // scroll into view within terminal
+    setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'end' }), 100);
+  }
+}
+
+function hideStep(sceneId, order) {
+  const el = document.querySelector(`.step[data-scene="${sceneId}"][data-order="${order}"]`);
+  if (el) el.classList.remove('visible');
+}
+
+function updateHud() {
+  const entry = flow[pos];
+  const sceneNum = sceneMap[entry.scene] || 1;
+  const hudHint = document.getElementById('hud-hint');
+  document.getElementById('hud-step').textContent = `Scene ${sceneNum} / 5`;
+  if (pos >= flow.length - 1) {
+    hudHint.textContent = 'Demo complete! ← p to go back';
+    hudHint.style.borderColor = 'var(--success)';
+    hudHint.style.color = 'var(--success)';
+    hudHint.style.background = 'rgba(166,227,161,0.15)';
+  } else {
+    hudHint.textContent = '← p / n → · Space / Click';
+    hudHint.style.borderColor = 'var(--accent)';
+    hudHint.style.color = 'var(--accent)';
+    hudHint.style.background = 'var(--accent-dim)';
+  }
+}
+
+function advance() {
+  if (transitioning || pos >= flow.length - 1) return;
+  transitioning = true;
+  pos++;
+  const entry = flow[pos];
+
+  showScene(entry.scene);
+  if (entry.step) showStep(entry.scene, entry.step);
+  updateHud();
+
+  setTimeout(() => { transitioning = false; }, 400);
+}
+
+function goBack() {
+  if (transitioning || pos <= 0) return;
+  // Cancel any auto-advance timer
+  if (autoAdvanceTimer) { clearInterval(autoAdvanceTimer); autoAdvanceTimer = null; }
+
+  transitioning = true;
+  const oldEntry = flow[pos];
+
+  // Hide the step we're leaving (if it's a within-scene step)
+  if (oldEntry.step) hideStep(oldEntry.scene, oldEntry.step);
+
+  // Reset okta loading overlay when going back through it
+  document.getElementById('okta-loading').classList.remove('active');
+  const arrow = document.querySelector('#scene-okta .arrow-hint');
+  if (arrow) arrow.style.display = '';
+
+  pos--;
+  const entry = flow[pos];
+
+  showScene(entry.scene);
+  updateHud();
+
+  setTimeout(() => { transitioning = false; }, 400);
+}
+
+// ── Cognito SSO button click ──
+document.getElementById('sso-btn').addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  advance();
+});
+
+// ── Okta verify button click ──
+document.getElementById('verify-btn').addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  document.getElementById('okta-loading').classList.add('active');
+  // Hide the arrow hint
+  const arrow = document.querySelector('#scene-okta .arrow-hint');
+  if (arrow) arrow.style.display = 'none';
+  setTimeout(() => advance(), 1500);
+});
+
+// ── Global keyboard / click ──
+document.addEventListener('keydown', (e) => {
+  // ── Go back ──
+  if (e.code === 'ArrowLeft' || e.key === 'p') {
+    e.preventDefault();
+    goBack();
+    return;
+  }
+  // ── Go forward ──
+  if (e.code === 'Space' || e.code === 'ArrowRight' || e.code === 'Enter' || e.key === 'n') {
+    e.preventDefault();
+    const entry = flow[pos];
+    if (entry.scene === 'scene-cognito' && pos === 2) {
+      advance();
+      return;
+    }
+    if (entry.scene === 'scene-okta') {
+      document.getElementById('verify-btn').click();
+      return;
+    }
+    advance();
+  }
+});
+
+document.addEventListener('click', (e) => {
+  // Don't double-handle explicit button clicks
+  if (e.target.closest('#sso-btn') || e.target.closest('#verify-btn')) return;
+  advance();
+});
+
+// Init
+updateHud();
+</script>
+</body>
+</html>
